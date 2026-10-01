@@ -47,7 +47,8 @@ interface FormValues {
 }
 
 // 从一行文本解析生日和姓名，固定格式：姓名 日期（空格分隔，姓名在前）
-// 日期内部分隔符支持 - / . , （半角或全角逗号），纯数字无需前导零
+// 日期支持两种写法：① 中文格式「1月1日」（结尾「日/号」可省略）② 分隔符格式「1-1」，
+// 分隔符支持 - / . , （半角或全角逗号），纯数字无需前导零
 function parseBirthdayLine(line: string): { name: string; month: number; day: number } | null {
   const tokens = line.trim().split(/\s+/);
   if (tokens.length !== 2) return null; // 格式：姓名 日期
@@ -55,11 +56,11 @@ function parseBirthdayLine(line: string): { name: string; month: number; day: nu
   const [name, dateToken] = tokens;
   if (!name || /^\d+$/.test(name)) return null; // 姓名缺失或纯数字视为无效
 
-  const match = dateToken.match(/^(\d{1,2})[-/.,，](\d{1,2})$/);
+  const match = dateToken.match(/^(?:(\d{1,2})月(\d{1,2})[日号]?|(\d{1,2})[-/.,，](\d{1,2}))$/);
   if (!match) return null;
 
-  const month = parseInt(match[1], 10);
-  const day = parseInt(match[2], 10);
+  const month = parseInt(match[1] ?? match[3], 10);
+  const day = parseInt(match[2] ?? match[4], 10);
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
 
   return { name, month, day };
@@ -327,7 +328,7 @@ export default function Home() {
           items.push({
             original: trimmedLine,
             name: null,
-            error: '无法解析（格式：姓名 月-日，空格分隔）',
+            error: '无法解析（格式：姓名 1月1日 或 姓名 月-日，空格分隔）',
           });
         } else {
           items.push({
@@ -608,10 +609,10 @@ export default function Home() {
         </div>
 
         <div style={{ marginBottom: 16 }}>
-          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500 }}>生日列表（一行一条，格式：姓名 月-日，空格分隔；日期内分隔符支持 - / . , ，纯数字无需前导零）：</label>
+          <label style={{ display: 'block', marginBottom: 8, fontWeight: 500 }}>生日列表（一行一条，格式：姓名 日期，空格分隔；日期支持「1月1日」或「1-1」，分隔符还可用 / . , ，纯数字无需前导零）：</label>
           <TextArea
             rows={10}
-            placeholder={`例如：\n阿米娅 12-23\n砂狼白子 5/16\n小鸟游星野 01,02\n白洲梓 12.26`}
+            placeholder={`例如：\n重岳 1月1日\n阿米娅 12月23日\n砂狼白子 5/16\n小鸟游星野 01,02\n白洲梓 12.26`}
             value={batchImportText}
             onChange={(e) => setBatchImportText(e.target.value)}
           />
