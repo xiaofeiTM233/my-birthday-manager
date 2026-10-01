@@ -24,11 +24,23 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const label = searchParams.get('label');
   const name = searchParams.get('name');
+  const monthParam = searchParams.get('month');
+  const dayParam = searchParams.get('day');
 
-  // 按姓名模糊查询 + 分组过滤
+  // 按姓名模糊查询 + 分组过滤 + 按生日（月、日）过滤
   const query: Record<string, unknown> = {};
   if (label) query.label = label;
   if (name) query.name = { $regex: escapeRegex(name.trim()), $options: 'i' };
+
+  // month 单独使用时查询该月全部生日；month + day 精确到某一天
+  const month = monthParam !== null ? Number(monthParam) : NaN;
+  if (Number.isInteger(month) && month >= 1 && month <= 12) {
+    query.month = month;
+    const day = dayParam !== null ? Number(dayParam) : NaN;
+    if (Number.isInteger(day) && day >= 1 && day <= MAX_DAYS[month - 1]) {
+      query.day = day;
+    }
+  }
 
   const birthdays = await BirthdayEntry.find(query).sort({ createdAt: -1 });
 

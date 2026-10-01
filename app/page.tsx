@@ -72,6 +72,7 @@ export default function Home() {
   const [form] = Form.useForm();
   const [filterLabel, setFilterLabel] = useState<string>('');
   const [filterName, setFilterName] = useState<string>('');
+  const [filterBirthday, setFilterBirthday] = useState<Dayjs | null>(null); // 生日筛选（仅月日）
   const [mounted, setMounted] = useState(false);
   const [labelOptions, setLabelOptions] = useState<string[]>(['A', 'B', 'C']); // 存储所有可用的组
   const [selectedLabel, setSelectedLabel] = useState<string>('A'); // 当前选择的组
@@ -128,13 +129,17 @@ export default function Home() {
   );
 
   // 获取数据
-  const fetchBirthdays = async (label = '', name = '') => {
+  const fetchBirthdays = async (label = '', name = '', birthday: Dayjs | null = null) => {
     setLoading(true);
     try {
       let url = '/api/birthdays';
       const params = new URLSearchParams();
       if (label && label !== 'All') params.append('label', label);
       if (name) params.append('name', name);
+      if (birthday) {
+        params.append('month', String(birthday.month() + 1));
+        params.append('day', String(birthday.date()));
+      }
       if (params.toString()) url += '?' + params.toString();
 
       const res = await fetch(url);
@@ -142,7 +147,7 @@ export default function Home() {
       if (json.success) {
         setData(json.data);
         // 只在无过滤条件时更新组选项，避免过滤查询时丢失其他组
-        if (!label && !name) {
+        if (!label && !name && !birthday) {
           const labels = [...new Set(json.data.map((item: BirthdayData) => item.label))] as string[];
           setLabelOptions(labels);
         }
@@ -230,7 +235,7 @@ export default function Home() {
         message.success('生日添加成功');
         form.setFieldsValue({ label: [labelValue] }); // 保持当前选择的组，使用数组格式
         form.setFieldsValue({ name: '', birthday: null }); // 只清空姓名和生日，保留分组和备注供下一次使用
-        fetchBirthdays(filterLabel, filterName); // 刷新列表
+        fetchBirthdays(filterLabel, filterName, filterBirthday); // 刷新列表
       } else {
         message.error(json.message || '添加失败');
       }
@@ -245,7 +250,7 @@ export default function Home() {
   const handleDelete = async (id: string) => {
     await fetch(`/api/birthdays?id=${id}`, { method: 'DELETE' });
     message.success('已删除');
-    fetchBirthdays(filterLabel, filterName);
+    fetchBirthdays(filterLabel, filterName, filterBirthday);
   };
 
   // 导出数据
@@ -522,7 +527,17 @@ export default function Home() {
               style={{ width: 200 }}
               value={filterName}
               onChange={(e) => setFilterName(e.target.value)}
-              onPressEnter={() => fetchBirthdays(filterLabel, filterName)}
+              onPressEnter={() => fetchBirthdays(filterLabel, filterName, filterBirthday)}
+              allowClear
+            />
+            <DatePicker
+              picker="date"
+              format="M-D"
+              placeholder="选择生日 (月-日)"
+              style={{ width: 150 }}
+              value={filterBirthday}
+              onChange={(value) => setFilterBirthday(value)}
+              disabledDate={(current) => current && current.year() !== FIXED_YEAR}
               allowClear
             />
             <Select
@@ -533,8 +548,8 @@ export default function Home() {
               options={['All', ...labelOptions].map(opt => ({ value: opt, label: opt }))}
               popupRender={renderGroupPopup}
             />
-            <Button type="primary" onClick={() => fetchBirthdays(filterLabel, filterName)}>查询</Button>
-            <Button icon={<ReloadOutlined />} onClick={() => { setFilterLabel(''); setFilterName(''); fetchBirthdays(''); }}>重置</Button>
+            <Button type="primary" onClick={() => fetchBirthdays(filterLabel, filterName, filterBirthday)}>查询</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { setFilterLabel(''); setFilterName(''); setFilterBirthday(null); fetchBirthdays(''); }}>重置</Button>
 
             <Space.Compact style={{ borderLeft: '1px solid #e0e0e0', paddingLeft: 10, marginLeft: 10 }}>
               <Select
