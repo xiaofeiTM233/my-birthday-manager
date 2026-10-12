@@ -1,10 +1,11 @@
 // app/page.tsx
 'use client';
 import { useRef, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Layout, Table, Input, Button, Form, Tag, Select, message, Card, Modal, DatePicker, Space, Alert, Divider } from 'antd';
 import type { InputRef } from 'antd';
 import type { Dayjs } from 'dayjs';
-import { SearchOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined, DownloadOutlined, GithubOutlined } from '@ant-design/icons';
+import { SearchOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined, DownloadOutlined, GithubOutlined, CalendarOutlined } from '@ant-design/icons';
 
 const { Header, Content } = Layout;
 const { TextArea } = Input;
@@ -67,6 +68,7 @@ function parseBirthdayLine(line: string): { name: string; month: number; day: nu
 }
 
 export default function Home() {
+  const router = useRouter();
   const [data, setData] = useState<BirthdayData[]>([]);
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
@@ -440,6 +442,13 @@ export default function Home() {
       <Header style={{ background: '#fff', padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 8px #f0f1f2' }}>
         <div style={{ fontSize: '18px', fontWeight: 'bold' }}>SnapBirthday</div>
         <Space>
+          <Button
+            type="text"
+            icon={<CalendarOutlined />}
+            onClick={() => router.push('/calendar')}
+          >
+            日历
+          </Button>
           <Button
             type="text"
             icon={<GithubOutlined />}
