@@ -1,7 +1,7 @@
 // app/calendar/page.tsx
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Layout, Card, Avatar, Select, Spin, Empty, Tooltip, Button, Space } from 'antd';
+import { Layout, Card, Avatar, Select, Spin, Empty, Tooltip, Button, Space, Modal } from 'antd';
 import { LeftOutlined, GithubOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import type { Dayjs } from 'dayjs';
@@ -18,6 +18,23 @@ interface BirthdayData {
   note: string;
   createdAt: string;
 }
+
+// 日历中展示用的条目（2 月 29 日生日在非闰年按 2 月 28 日展示）
+interface CalendarItem extends BirthdayData {
+  displayMonth: number;
+  displayDay: number;
+}
+
+interface MonthInfo {
+  month: number;
+  name: string;
+  list: CalendarItem[];
+  firstWeekday: number; // 0 = 周日
+  daysInMonth: number;
+}
+
+const UPCOMING_WINDOW_DAYS = 7; // 「即将到来」只展示近一周
+const UPCOMING_PREVIEW_COUNT = 3; // 折叠时默认展示条数
 
 // 分组配色（按分组名哈希取色，保证同一分组颜色稳定）
 const LABEL_COLORS = ['#722ed1', '#13c2c2', '#2f54eb', '#eb2f96', '#52c41a', '#fa541c', '#faad14', '#597ef7'];
@@ -62,12 +79,86 @@ function daysUntilNextBirthday(month: number, day: number, today: Dayjs): number
 const MONTH_NAMES = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
 const WEEKDAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
 
+// 某一天全部生日的 tooltip 内容（以日为粒度聚合展示）
+function DayTooltip({ list }: { list: CalendarItem[] }) {
+  return (
+    <div style={{ minWidth: 130 }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        {list[0].month}月{list[0].day}日 · {list.length} 个生日
+      </div>
+      {list.map((item) => (
+        <div key={item._id} style={{ display: 'flex', alignItems: 'center', gap: 6, lineHeight: 1.9 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: labelColor(item.label), flexShrink: 0 }} />
+          <span>{item.name}</span>
+          <span style={{ color: 'rgba(255,255,255,.65)' }}>{item.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 单月日历网格（zoom = 弹窗放大模式，格子与头像更大）
+function MonthCalendar({ info, today, zoom = false }: { info: MonthInfo; today: Dayjs; zoom?: boolean }) {
+  const cellMinHeight = zoom ? 84 : 48;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, background: '#f0f0f0', border: '1px solid #f0f0f0', borderRadius: 6, overflow: 'hidden' }}>
+      {WEEKDAY_NAMES.map((w) => (
+        <div key={w} style={{ background: '#fafafa', textAlign: 'center', fontSize: zoom ? 13 : 11, color: '#999', padding: zoom ? '6px 0' : '3px 0' }}>
+          {w}
+        </div>
+      ))}
+      {/* 月初前置空白 */}
+      {Array.from({ length: info.firstWeekday }).map((_, i) => (
+        <div key={`empty-${i}`} style={{ background: '#fff', minHeight: cellMinHeight }} />
+      ))}
+      {/* 日期格子 */}
+      {Array.from({ length: info.daysInMonth }).map((_, i) => {
+        const d = i + 1;
+        const dayList = info.list.filter((item) => item.displayDay === d);
+        const isToday = info.month === today.month() + 1 && d === today.date();
+        const cellStyle = {
+          background: isToday ? '#fff7e6' : '#fff',
+          minHeight: cellMinHeight,
+          padding: zoom ? '4px 6px' : '2px 3px',
+          cursor: dayList.length > 0 ? 'pointer' : 'default',
+        };
+        const cellContent = (
+          <>
+            <div style={{ fontSize: zoom ? 14 : 11, color: isToday ? '#fa541c' : '#999', fontWeight: isToday ? 700 : 400 }}>
+              {d}
+            </div>
+            {dayList.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: zoom ? 4 : 2, marginTop: zoom ? 4 : 2 }}>
+                {dayList.map((item) => (
+                  <Avatar key={item._id} size={zoom ? 28 : 16} style={{ background: labelColor(item.label), fontSize: zoom ? 13 : 10 }}>
+                    {item.name.slice(0, 1)}
+                  </Avatar>
+                ))}
+              </div>
+            )}
+          </>
+        );
+        // 以日为粒度：悬停某一天展示当天全部生日
+        return dayList.length > 0 ? (
+          <Tooltip key={d} title={<DayTooltip list={dayList} />}>
+            <div style={cellStyle}>{cellContent}</div>
+          </Tooltip>
+        ) : (
+          <div key={d} style={cellStyle}>{cellContent}</div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function CalendarPage() {
   const router = useRouter();
   const [data, setData] = useState<BirthdayData[]>([]);
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [filterLabel, setFilterLabel] = useState<string>(''); // 分组筛选（空 = 全部）
+  const [expanded, setExpanded] = useState(false); // 「即将到来」折叠状态
+  const [zoomMonth, setZoomMonth] = useState<number | null>(null); // 放大查看的月份
 
   // 获取数据
   const fetchBirthdays = async () => {
@@ -98,7 +189,7 @@ export default function CalendarPage() {
     [data, filterLabel]
   );
 
-  // 即将到来：按倒计时天数排序
+  // 全部生日按倒计时排序
   const upcoming = useMemo(() => {
     const today = dayjs().startOf('day');
     return filteredData
@@ -112,30 +203,44 @@ export default function CalendarPage() {
       );
   }, [filteredData]);
 
+  // 即将到来：只取近一周
+  const upcomingInWeek = useMemo(
+    () => upcoming.filter((item) => item.days <= UPCOMING_WINDOW_DAYS),
+    [upcoming]
+  );
+
+  // 折叠时只展示前几条
+  const visibleUpcoming = expanded
+    ? upcomingInWeek
+    : upcomingInWeek.slice(0, UPCOMING_PREVIEW_COUNT);
+
   // 全年日历：12 个月
   const months = useMemo(() => {
     const year = dayjs().year();
-    const byMonth = new Map<number, BirthdayData[]>();
+    const byMonth = new Map<number, CalendarItem[]>();
     for (const item of filteredData) {
       const resolved = resolveMonthDay(item.month, item.day, year);
       const list = byMonth.get(resolved.month) ?? [];
-      list.push({ ...item, month: resolved.month, day: resolved.day });
+      list.push({ ...item, displayMonth: resolved.month, displayDay: resolved.day });
       byMonth.set(resolved.month, list);
     }
     return MONTH_NAMES.map((name, index) => {
       const month = index + 1;
       const list = (byMonth.get(month) ?? []).sort(
-        (a, b) => a.day - b.day || a.name.localeCompare(b.name, 'zh')
+        (a, b) => a.displayDay - b.displayDay || a.name.localeCompare(b.name, 'zh')
       );
       return {
         month,
         name,
         list,
-        firstWeekday: dateOf(year, month, 1).day(), // 0 = 周日
+        firstWeekday: dateOf(year, month, 1).day(),
         daysInMonth: dateOf(year, month, 1).daysInMonth(),
       };
     });
   }, [filteredData]);
+
+  const zoomInfo: MonthInfo | null =
+    zoomMonth !== null ? months.find((m) => m.month === zoomMonth) ?? null : null;
 
   if (!mounted) {
     return null;
@@ -171,12 +276,12 @@ export default function CalendarPage() {
 
       <Content style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
         <Spin spinning={loading}>
-          {/* 上方：即将到来列表 */}
+          {/* 上方：即将到来（近一周，可折叠） */}
           <Card
             title="即将到来"
             extra={
               <Space>
-                <span style={{ color: '#999', fontSize: 13 }}>接下来</span>
+                <span style={{ color: '#999', fontSize: 13 }}>接下来 {UPCOMING_WINDOW_DAYS} 天</span>
                 <Select
                   placeholder="全部分组"
                   style={{ width: 130 }}
@@ -192,60 +297,70 @@ export default function CalendarPage() {
             }
             style={{ marginBottom: 24 }}
           >
-            {upcoming.length === 0 ? (
-              <Empty description="暂无生日数据" />
+            {upcomingInWeek.length === 0 ? (
+              <Empty description={`近 ${UPCOMING_WINDOW_DAYS} 天没有生日`} />
             ) : (
-              <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden' }}>
-                {upcoming.map((item, index) => {
-                  const color = labelColor(item.label);
-                  const isToday = item.days === 0;
-                  return (
-                    <div
-                      key={item._id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 12,
-                        padding: '10px 14px',
-                        background: isToday ? '#fff7e6' : '#fff',
-                        borderBottom: index < upcoming.length - 1 ? '1px solid #f5f5f5' : 'none',
-                      }}
-                    >
-                      {/* 分组徽标 */}
+              <>
+                <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden' }}>
+                  {visibleUpcoming.map((item, index) => {
+                    const color = labelColor(item.label);
+                    const isToday = item.days === 0;
+                    return (
                       <div
+                        key={item._id}
                         style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 6,
-                          background: color,
-                          color: '#fff',
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: 11,
-                          fontWeight: 600,
-                          flexShrink: 0,
-                          overflow: 'hidden',
-                          whiteSpace: 'nowrap',
-                          padding: '0 2px',
+                          gap: 12,
+                          padding: '10px 14px',
+                          background: isToday ? '#fff7e6' : '#fff',
+                          borderBottom: index < visibleUpcoming.length - 1 ? '1px solid #f5f5f5' : 'none',
                         }}
                       >
-                        {item.label}
+                        {/* 分组徽标 */}
+                        <div
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 6,
+                            background: color,
+                            color: '#fff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 11,
+                            fontWeight: 600,
+                            flexShrink: 0,
+                            overflow: 'hidden',
+                            whiteSpace: 'nowrap',
+                            padding: '0 2px',
+                          }}
+                        >
+                          {item.label}
+                        </div>
+                        <Avatar size={36} style={{ background: color, flexShrink: 0 }}>
+                          {item.name.slice(0, 1)}
+                        </Avatar>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
+                          <div style={{ color: '#999', fontSize: 12 }}>{item.month}月{item.day}日</div>
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: isToday ? '#fa541c' : undefined }}>
+                          {isToday ? '今天' : `${item.days} 天`}
+                        </div>
                       </div>
-                      <Avatar size={36} style={{ background: color, flexShrink: 0 }}>
-                        {item.name.slice(0, 1)}
-                      </Avatar>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
-                        <div style={{ color: '#999', fontSize: 12 }}>{item.month}月{item.day}日</div>
-                      </div>
-                      <div style={{ fontWeight: 700, fontSize: 15, color: isToday ? '#fa541c' : undefined }}>
-                        {isToday ? '今天' : `${item.days} 天`}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+                {/* 折叠 / 展开 */}
+                {upcomingInWeek.length > UPCOMING_PREVIEW_COUNT && (
+                  <div style={{ textAlign: 'center', marginTop: 4 }}>
+                    <Button type="link" size="small" onClick={() => setExpanded((v) => !v)}>
+                      {expanded ? '收起' : `展开全部 ${upcomingInWeek.length} 条`}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </Card>
 
@@ -261,51 +376,24 @@ export default function CalendarPage() {
             {total === 0 ? (
               <Empty description="暂无生日数据" />
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 16 }}>
                 {months.map((m) => (
                   <div key={m.month} style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
-                    {/* 月份头部 */}
-                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '8px 10px', borderBottom: '1px solid #f0f0f0' }}>
-                      <span style={{ fontWeight: 700, fontSize: 14 }}>{m.name}</span>
+                    {/* 月份头部：月份名称本身即放大按钮 */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderBottom: '1px solid #f0f0f0' }}>
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ fontWeight: 700, fontSize: 14, padding: 0, height: 'auto' }}
+                        title="点击放大查看该月"
+                        onClick={() => setZoomMonth(m.month)}
+                      >
+                        {m.name}
+                      </Button>
                       <span style={{ color: '#999', fontSize: 12 }}>{m.list.length} 个生日</span>
                     </div>
                     <div style={{ padding: 8 }}>
-                      {/* 用 1px 间距 + 容器底色画出日历网格线 */}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, background: '#f0f0f0', border: '1px solid #f0f0f0', borderRadius: 6, overflow: 'hidden' }}>
-                        {WEEKDAY_NAMES.map((w) => (
-                          <div key={w} style={{ background: '#fafafa', textAlign: 'center', fontSize: 11, color: '#999', padding: '3px 0' }}>
-                            {w}
-                          </div>
-                        ))}
-                        {/* 月初前置空白 */}
-                        {Array.from({ length: m.firstWeekday }).map((_, i) => (
-                          <div key={`empty-${i}`} style={{ background: '#fff', minHeight: 44 }} />
-                        ))}
-                        {/* 日期格子 */}
-                        {Array.from({ length: m.daysInMonth }).map((_, i) => {
-                          const d = i + 1;
-                          const dayList = m.list.filter((item) => item.day === d);
-                          const isToday = m.month === today.month() + 1 && d === today.date();
-                          return (
-                            <div key={d} style={{ background: isToday ? '#fff7e6' : '#fff', minHeight: 44, padding: '2px 3px' }}>
-                              <div style={{ fontSize: 11, color: isToday ? '#fa541c' : '#999', fontWeight: isToday ? 700 : 400 }}>
-                                {d}
-                              </div>
-                              {dayList.length > 0 && (
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, marginTop: 2 }}>
-                                  {dayList.map((item) => (
-                                    <Tooltip key={item._id} title={`${item.name} · ${item.month}月${item.day}日`}>
-                                      <Avatar size={16} style={{ background: labelColor(item.label), fontSize: 10 }}>
-                                        {item.name.slice(0, 1)}
-                                      </Avatar>
-                                    </Tooltip>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <MonthCalendar info={m} today={today} />
                     </div>
                   </div>
                 ))}
@@ -314,6 +402,47 @@ export default function CalendarPage() {
           </Card>
         </Spin>
       </Content>
+
+      {/* 单月放大查看弹窗 */}
+      <Modal
+        open={zoomMonth !== null}
+        title={zoomInfo ? `${zoomInfo.name} · ${today.year()} 年` : ''}
+        onCancel={() => setZoomMonth(null)}
+        footer={<Button onClick={() => setZoomMonth(null)}>关闭</Button>}
+        width={720}
+      >
+        {zoomInfo && (
+          <>
+            <div style={{ marginBottom: 12, color: '#999', fontSize: 13 }}>
+              共 {zoomInfo.list.length} 个生日，悬停日期可查看当天生日
+            </div>
+            <MonthCalendar info={zoomInfo} today={today} zoom />
+            {zoomInfo.list.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                {zoomInfo.list.map((item) => (
+                  <div
+                    key={item._id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 0',
+                      borderBottom: '1px solid #f5f5f5',
+                    }}
+                  >
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: labelColor(item.label), flexShrink: 0 }} />
+                    <Avatar size={24} style={{ background: labelColor(item.label), fontSize: 12 }}>
+                      {item.name.slice(0, 1)}
+                    </Avatar>
+                    <span style={{ fontWeight: 500 }}>{item.name}</span>
+                    <span style={{ color: '#999', fontSize: 12 }}>{item.month}月{item.day}日</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </Modal>
     </Layout>
   );
 }
