@@ -97,9 +97,64 @@ function DayTooltip({ list }: { list: CalendarItem[] }) {
   );
 }
 
+// 日期格子内的头像网格：固定每行 3 个，默认最多 2 行（3×2），超出收纳为 +N
+function DayAvatarGrid({ list, zoom }: { list: CalendarItem[]; zoom: boolean }) {
+  const perRow = 3;
+  const maxRows = zoom ? 3 : 2;
+  const maxVisible = perRow * maxRows;
+  const hasMore = list.length > maxVisible;
+  const visible = hasMore ? list.slice(0, maxVisible - 1) : list;
+  const hiddenCount = list.length - visible.length;
+  const gap = zoom ? 4 : 2;
+  const size = zoom ? 30 : 20;
+  const cells = [
+    ...visible.map((item) => ({ key: item._id, color: labelColor(item.label), text: item.name.slice(0, 1), isMore: false })),
+    ...(hasMore
+      ? [{ key: '__more', color: '#f0f0f0', text: hiddenCount > 9 ? '9+' : `+${hiddenCount}`, isMore: true }]
+      : []),
+  ];
+  // 按每行 perRow 个切分，避免单个头像被 1fr 摊到格子中间
+  const rows: typeof cells[] = [];
+  for (let i = 0; i < cells.length; i += perRow) {
+    rows.push(cells.slice(i, i + perRow));
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap, marginTop: zoom ? 4 : 3 }}>
+      {rows.map((row) => (
+        <div key={row[0].key} style={{ display: 'flex', alignItems: 'flex-start', gap }}>
+          {row.map((cell) => (
+            <div
+              key={cell.key}
+              style={{
+                flex: '1 1 0',
+                minWidth: 0,
+                maxWidth: size,
+                aspectRatio: '1 / 1',
+                borderRadius: '50%',
+                background: cell.color,
+                color: cell.isMore ? '#8c8c8c' : '#fff',
+                fontSize: cell.isMore ? (zoom ? 11 : 8) : zoom ? 12 : 9,
+                lineHeight: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+                userSelect: 'none',
+              }}
+            >
+              {cell.text}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // 单月日历网格（zoom = 弹窗放大模式，格子与头像更大）
 function MonthCalendar({ info, today, zoom = false }: { info: MonthInfo; today: Dayjs; zoom?: boolean }) {
-  const cellMinHeight = zoom ? 84 : 48;
+  const cellMinHeight = zoom ? 120 : 66;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, background: '#f0f0f0', border: '1px solid #f0f0f0', borderRadius: 6, overflow: 'hidden' }}>
       {WEEKDAY_NAMES.map((w) => (
@@ -127,15 +182,7 @@ function MonthCalendar({ info, today, zoom = false }: { info: MonthInfo; today: 
             <div style={{ fontSize: zoom ? 14 : 11, color: isToday ? '#fa541c' : '#999', fontWeight: isToday ? 700 : 400 }}>
               {d}
             </div>
-            {dayList.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: zoom ? 4 : 2, marginTop: zoom ? 4 : 2 }}>
-                {dayList.map((item) => (
-                  <Avatar key={item._id} size={zoom ? 28 : 16} style={{ background: labelColor(item.label), fontSize: zoom ? 13 : 10 }}>
-                    {item.name.slice(0, 1)}
-                  </Avatar>
-                ))}
-              </div>
-            )}
+            {dayList.length > 0 && <DayAvatarGrid list={dayList} zoom={zoom} />}
           </>
         );
         // 以日为粒度：悬停某一天展示当天全部生日
@@ -376,7 +423,7 @@ export default function CalendarPage() {
             {total === 0 ? (
               <Empty description="暂无生日数据" />
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(440px, 100%), 1fr))', gap: 16 }}>
                 {months.map((m) => (
                   <div key={m.month} style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
                     {/* 月份头部：月份名称本身即放大按钮 */}
