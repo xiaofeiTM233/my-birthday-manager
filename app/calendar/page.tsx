@@ -1,11 +1,13 @@
 // app/calendar/page.tsx
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Layout, Card, Avatar, Select, Spin, Empty, Tooltip, Button, Space, Modal } from 'antd';
+import { Layout, Card, Select, Spin, Empty, Tooltip, Button, Space, Modal, Segmented } from 'antd';
 import { LeftOutlined, GithubOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
+import CharAvatar from '@/components/CharAvatar';
+import { labelColor } from '@/lib/avatar';
 
 const { Header, Content } = Layout;
 
@@ -36,16 +38,10 @@ interface MonthInfo {
 const UPCOMING_WINDOW_DAYS = 7; // 「即将到来」只展示近一周
 const UPCOMING_PREVIEW_COUNT = 3; // 折叠时默认展示条数
 
-// 分组配色（按分组名哈希取色，保证同一分组颜色稳定）
-const LABEL_COLORS = ['#722ed1', '#13c2c2', '#2f54eb', '#eb2f96', '#52c41a', '#fa541c', '#faad14', '#597ef7'];
-
-function labelColor(label: string): string {
-  let hash = 0;
-  for (let i = 0; i < label.length; i += 1) {
-    hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
-  }
-  return LABEL_COLORS[hash % LABEL_COLORS.length];
-}
+// 头像展示模式：image = 真实头像图片，text = 文字头像
+type AvatarMode = 'image' | 'text';
+// localStorage 键，两页共用
+const AVATAR_MODE_KEY = 'avatarMode';
 
 // 闰年判断
 function isLeapYear(year: number): boolean {
@@ -98,7 +94,8 @@ function DayTooltip({ list }: { list: CalendarItem[] }) {
 }
 
 // 日期格子内的头像网格：固定每行 3 个，默认最多 2 行（3×2），超出收纳为 +N
-function DayAvatarGrid({ list, zoom }: { list: CalendarItem[]; zoom: boolean }) {
+// mode='image' 时展示真实头像（取不到回退为文字），mode='text' 时展示文字头像
+function DayAvatarGrid({ list, zoom, mode }: { list: CalendarItem[]; zoom: boolean; mode: AvatarMode }) {
   const perRow = 3;
   const maxRows = zoom ? 3 : 2;
   const maxVisible = perRow * maxRows;
@@ -108,9 +105,9 @@ function DayAvatarGrid({ list, zoom }: { list: CalendarItem[]; zoom: boolean }) 
   const gap = zoom ? 4 : 2;
   const size = zoom ? 30 : 20;
   const cells = [
-    ...visible.map((item) => ({ key: item._id, color: labelColor(item.label), text: item.name.slice(0, 1), isMore: false })),
+    ...visible.map((item) => ({ key: item._id, item, isMore: false })),
     ...(hasMore
-      ? [{ key: '__more', color: '#f0f0f0', text: hiddenCount > 9 ? '9+' : `+${hiddenCount}`, isMore: true }]
+      ? [{ key: '__more', item: null, isMore: true }]
       : []),
   ];
   // 按每行 perRow 个切分，避免单个头像被 1fr 摊到格子中间
@@ -131,11 +128,6 @@ function DayAvatarGrid({ list, zoom }: { list: CalendarItem[]; zoom: boolean }) 
                 minWidth: 0,
                 maxWidth: size,
                 aspectRatio: '1 / 1',
-                borderRadius: '50%',
-                background: cell.color,
-                color: cell.isMore ? '#8c8c8c' : '#fff',
-                fontSize: cell.isMore ? (zoom ? 11 : 8) : zoom ? 12 : 9,
-                lineHeight: 1,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -143,7 +135,33 @@ function DayAvatarGrid({ list, zoom }: { list: CalendarItem[]; zoom: boolean }) 
                 userSelect: 'none',
               }}
             >
-              {cell.text}
+              {cell.item ? (
+                <CharAvatar
+                  name={cell.item.name}
+                  label={cell.item.label}
+                  size={size}
+                  fill
+                  mode={mode}
+                  fallback="text"
+                />
+              ) : (
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    borderRadius: '50%',
+                    background: '#f0f0f0',
+                    color: '#8c8c8c',
+                    fontSize: zoom ? 11 : 8,
+                    lineHeight: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {hiddenCount > 9 ? '9+' : `+${hiddenCount}`}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -153,7 +171,7 @@ function DayAvatarGrid({ list, zoom }: { list: CalendarItem[]; zoom: boolean }) 
 }
 
 // 单月日历网格（zoom = 弹窗放大模式，格子与头像更大）
-function MonthCalendar({ info, today, zoom = false }: { info: MonthInfo; today: Dayjs; zoom?: boolean }) {
+function MonthCalendar({ info, today, zoom = false, mode = 'image' }: { info: MonthInfo; today: Dayjs; zoom?: boolean; mode?: AvatarMode }) {
   const cellMinHeight = zoom ? 120 : 66;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, background: '#f0f0f0', border: '1px solid #f0f0f0', borderRadius: 6, overflow: 'hidden' }}>
@@ -182,7 +200,7 @@ function MonthCalendar({ info, today, zoom = false }: { info: MonthInfo; today: 
             <div style={{ fontSize: zoom ? 14 : 11, color: isToday ? '#fa541c' : '#999', fontWeight: isToday ? 700 : 400 }}>
               {d}
             </div>
-            {dayList.length > 0 && <DayAvatarGrid list={dayList} zoom={zoom} />}
+            {dayList.length > 0 && <DayAvatarGrid list={dayList} zoom={zoom} mode={mode} />}
           </>
         );
         // 以日为粒度：悬停某一天展示当天全部生日
@@ -206,6 +224,22 @@ export default function CalendarPage() {
   const [filterLabel, setFilterLabel] = useState<string>(''); // 分组筛选（空 = 全部）
   const [expanded, setExpanded] = useState(false); // 「即将到来」折叠状态
   const [zoomMonth, setZoomMonth] = useState<number | null>(null); // 放大查看的月份
+  // 头像 图/文 切换
+  const [avatarMode, setAvatarMode] = useState<AvatarMode>('image');
+
+  // 读取头像展示模式（默认图片模式）
+  useEffect(() => {
+    const saved = localStorage.getItem(AVATAR_MODE_KEY);
+    if (saved === 'image' || saved === 'text') {
+      setAvatarMode(saved);
+    }
+  }, []);
+
+  // 切换头像展示模式并持久化
+  const handleAvatarModeChange = (value: AvatarMode) => {
+    setAvatarMode(value);
+    localStorage.setItem(AVATAR_MODE_KEY, value);
+  };
 
   // 获取数据
   const fetchBirthdays = async () => {
@@ -309,6 +343,15 @@ export default function CalendarPage() {
           </Button>
         </Space>
         <Space>
+          <Segmented
+            size="small"
+            value={avatarMode}
+            onChange={(value) => handleAvatarModeChange(value as AvatarMode)}
+            options={[
+              { label: '图', value: 'image' },
+              { label: '文', value: 'text' },
+            ]}
+          />
           <Button
             type="text"
             icon={<GithubOutlined />}
@@ -385,9 +428,13 @@ export default function CalendarPage() {
                         >
                           {item.label}
                         </div>
-                        <Avatar size={36} style={{ background: color, flexShrink: 0 }}>
-                          {item.name.slice(0, 1)}
-                        </Avatar>
+                        <CharAvatar
+                          name={item.name}
+                          label={item.label}
+                          size={36}
+                          mode={avatarMode}
+                          fallback="text"
+                        />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
                           <div style={{ color: '#999', fontSize: 12 }}>{item.month}月{item.day}日</div>
@@ -440,7 +487,7 @@ export default function CalendarPage() {
                       <span style={{ color: '#999', fontSize: 12 }}>{m.list.length} 个生日</span>
                     </div>
                     <div style={{ padding: 8 }}>
-                      <MonthCalendar info={m} today={today} />
+                      <MonthCalendar info={m} today={today} mode={avatarMode} />
                     </div>
                   </div>
                 ))}
@@ -463,7 +510,7 @@ export default function CalendarPage() {
             <div style={{ marginBottom: 12, color: '#999', fontSize: 13 }}>
               共 {zoomInfo.list.length} 个生日，悬停日期可查看当天生日
             </div>
-            <MonthCalendar info={zoomInfo} today={today} zoom />
+            <MonthCalendar info={zoomInfo} today={today} zoom mode={avatarMode} />
             {zoomInfo.list.length > 0 && (
               <div style={{ marginTop: 16 }}>
                 {zoomInfo.list.map((item) => (
@@ -478,9 +525,13 @@ export default function CalendarPage() {
                     }}
                   >
                     <span style={{ width: 10, height: 10, borderRadius: 2, background: labelColor(item.label), flexShrink: 0 }} />
-                    <Avatar size={24} style={{ background: labelColor(item.label), fontSize: 12 }}>
-                      {item.name.slice(0, 1)}
-                    </Avatar>
+                    <CharAvatar
+                      name={item.name}
+                      label={item.label}
+                      size={24}
+                      mode={avatarMode}
+                      fallback="text"
+                    />
                     <span style={{ fontWeight: 500 }}>{item.name}</span>
                     <span style={{ color: '#999', fontSize: 12 }}>{item.month}月{item.day}日</span>
                   </div>

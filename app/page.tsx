@@ -6,6 +6,7 @@ import { Layout, Table, Input, Button, Form, Tag, Select, message, Card, Modal, 
 import type { InputRef } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { SearchOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined, DownloadOutlined, GithubOutlined, CalendarOutlined } from '@ant-design/icons';
+import CharAvatar from '@/components/CharAvatar';
 
 const { Header, Content } = Layout;
 const { TextArea } = Input;
@@ -87,6 +88,8 @@ export default function Home() {
   const [pageSize, setPageSize] = useState(10); // 每页条数
   const [newLabelInput, setNewLabelInput] = useState(''); // 添加分组输入框的值
   const addLabelInputRef = useRef<InputRef>(null); // 添加分组输入框引用
+  // 头像 图/文 模式，与日历页共用
+  const [avatarMode, setAvatarMode] = useState<'image' | 'text'>('image');
 
   // 添加新分组
   const handleAddLabel = (e: React.MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => {
@@ -170,6 +173,12 @@ export default function Home() {
 
     if (savedSelectedLabel) {
       setSelectedLabel(savedSelectedLabel);
+    }
+
+    // 读取头像展示模式（默认图片模式）
+    const savedAvatarMode = localStorage.getItem('avatarMode');
+    if (savedAvatarMode === 'image' || savedAvatarMode === 'text') {
+      setAvatarMode(savedAvatarMode);
     }
 
     setMounted(true);
@@ -387,6 +396,21 @@ export default function Home() {
 
   // 表格列定义
   const columns = [
+    {
+      title: '头像',
+      key: 'avatar',
+      width: 60,
+      render: (_value: unknown, record: BirthdayData) => (
+        // 图片模式下取不到头像则不展示 Avatar 组件
+        <CharAvatar
+          name={record.name}
+          label={record.label}
+          size={32}
+          mode={avatarMode}
+          fallback="none"
+        />
+      ),
+    },
     {
       title: '分组',
       dataIndex: 'label',
