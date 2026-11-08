@@ -23,14 +23,15 @@ export default function CharAvatar({
   mode = 'image',
   fallback = 'text',
 }: CharAvatarProps) {
+  // 分组不支持头像（或没有对应游戏素材）时没有代理地址，直接走兜底
   const url = avatarUrl(name, label);
-  const [state, setState] = useState<'pending' | 'ok' | 'error'>('pending');
+  const [state, setState] = useState<'pending' | 'ok' | 'error'>(url ? 'pending' : 'error');
   const [loadedUrl, setLoadedUrl] = useState(url);
 
   // 头像地址变化时重置加载状态（渲染期调整 state，避免 effect 里 setState）
   if (loadedUrl !== url) {
     setLoadedUrl(url);
-    setState('pending');
+    setState(url ? 'pending' : 'error');
   }
 
   const color = labelColor(label);
@@ -87,23 +88,25 @@ export default function CharAvatar({
         userSelect: 'none',
       }}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={url}
-        alt={name}
-        width={fill ? undefined : size}
-        height={fill ? undefined : size}
-        style={{
-          objectFit: 'cover',
-          width: '100%',
-          height: '100%',
-          display: state === 'ok' ? 'block' : 'none',
-          position: 'absolute',
-          inset: 0,
-        }}
-        onLoad={() => setState('ok')}
-        onError={() => setState('error')}
-      />
+      {url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={name}
+          width={fill ? undefined : size}
+          height={fill ? undefined : size}
+          style={{
+            objectFit: 'cover',
+            width: '100%',
+            height: '100%',
+            display: state === 'ok' ? 'block' : 'none',
+            position: 'absolute',
+            inset: 0,
+          }}
+          onLoad={() => setState('ok')}
+          onError={() => setState('error')}
+        />
+      )}
       {state !== 'ok' && fallback === 'text' && <span>{initial}</span>}
     </div>
   );
