@@ -81,6 +81,57 @@ export async function POST(request: Request) {
   }
 }
 
+export async function PUT(request: Request) {
+  await dbConnect();
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get('id');
+  if (!id) {
+    return NextResponse.json({ success: false, message: '缺少记录 id' }, { status: 400 });
+  }
+
+  const body = await request.json();
+  const { name, month, day, label, note } = body;
+
+  if (!name || !label) {
+    return NextResponse.json({ success: false, message: '缺少姓名或分组' }, { status: 400 });
+  }
+
+  const m = Number(month);
+  const d = Number(day);
+  if (!isValidDate(m, d)) {
+    return NextResponse.json(
+      { success: false, message: '无效的生日日期（月份 1-12，日期需符合当月天数）' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const updated = await BirthdayEntry.findByIdAndUpdate(
+      id,
+      { name: String(name).trim(), month: m, day: d, label, note },
+      { new: true, runValidators: true }
+    );
+    if (!updated) {
+      return NextResponse.json({ success: false, message: '记录不存在' }, { status: 404 });
+    }
+    return NextResponse.json({ success: true, data: updated });
+  } catch (error) {
+    const code = (error as { code?: number } | null)?.code;
+    if (code === 11000) {
+      return NextResponse.json({ success: false, message: '该姓名的这条生日记录已存在' }, { status: 409 });
+    }
+    const name = (error as { name?: string } | null)?.name;
+    if (name === 'CastError') {
+      return NextResponse.json({ success: false, message: '记录不存在' }, { status: 404 });
+    }
+    if (name === 'ValidationError') {
+      return NextResponse.json({ success: false, message: '数据校验失败' }, { status: 400 });
+    }
+    const errorMessage = error instanceof Error ? error.message : '服务器错误';
+    return NextResponse.json({ success: false, message: errorMessage }, { status: 500 });
+  }
+}
+
 export async function DELETE(request: Request) {
   await dbConnect();
   const { searchParams } = new URL(request.url);

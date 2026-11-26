@@ -2,10 +2,10 @@
 'use client';
 import { useRef, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Layout, Table, Input, Button, Form, Tag, Select, message, Card, Modal, DatePicker, Space, Alert, Divider } from 'antd';
+import { Layout, Table, Input, Button, Form, Tag, Select, message, Card, Modal, DatePicker, Space, Divider } from 'antd';
 import type { InputRef } from 'antd';
-import type { Dayjs } from 'dayjs';
-import { SearchOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined, DownloadOutlined, GithubOutlined, CalendarOutlined, CloudDownloadOutlined } from '@ant-design/icons';
+import dayjs, { type Dayjs } from 'dayjs';
+import { SearchOutlined, PlusOutlined, DeleteOutlined, EditOutlined, ReloadOutlined, UploadOutlined, DownloadOutlined, GithubOutlined, CalendarOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import CharAvatar from '@/components/CharAvatar';
 import type { CatalogGame, CatalogItem } from '@/lib/catalog';
 
@@ -79,6 +79,11 @@ export default function Home() {
   const [data, setData] = useState<BirthdayData[]>([]);
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
+  // 编辑弹窗
+  const [editForm] = Form.useForm();
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<BirthdayData | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
   const [filterLabel, setFilterLabel] = useState<string>('');
   const [filterName, setFilterName] = useState<string>('');
   const [filterBirthday, setFilterBirthday] = useState<Dayjs | null>(null); // 生日筛选（仅月日）
@@ -283,6 +288,72 @@ export default function Home() {
     await fetch(`/api/birthdays?id=${id}`, { method: 'DELETE' });
     message.success('已删除');
     fetchBirthdays(filterLabel, filterName, filterBirthday);
+  };
+
+  // 打开编辑弹窗
+  const handleOpenEdit = (record: BirthdayData) => {
+    setEditingRecord(record);
+    editForm.setFieldsValue({
+      name: record.name,
+      // 月日固定挂在闰年上，2 月 29 日也能正常显示
+      birthday: dayjs(
+        `${FIXED_YEAR}-${String(record.month).padStart(2, '0')}-${String(record.day).padStart(2, '0')}`
+      ),
+      label: [record.label],
+      note: record.note || '',
+    });
+    setEditModalOpen(true);
+  };
+
+  // 保存编辑
+  const handleUpdate = async () => {
+    if (!editingRecord) return;
+
+    let values: FormValues;
+    try {
+      values = await editForm.validateFields();
+    } catch {
+      return;
+    }
+
+    const labelValue = Array.isArray(values.label) ? values.label[0] : values.label;
+    if (!values.birthday || !labelValue) {
+      message.error('请完整填写姓名、生日和分组');
+      return;
+    }
+
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/birthdays?id=${editingRecord._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: values.name,
+          month: values.birthday.month() + 1,
+          day: values.birthday.date(),
+          label: labelValue,
+          note: values.note,
+        }),
+      });
+      const json: { success: boolean; message?: string } = await res.json();
+
+      if (!res.ok || !json.success) {
+        message.error(json.message || '保存失败');
+        return;
+      }
+
+      if (!labelOptions.includes(labelValue)) {
+        setLabelOptions([...labelOptions, labelValue]);
+      }
+      message.success('已保存');
+      setEditModalOpen(false);
+      setEditingRecord(null);
+      fetchBirthdays(filterLabel, filterName, filterBirthday);
+    } catch {
+      message.error('网络请求错误');
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   // 导出数据
@@ -594,14 +665,23 @@ export default function Home() {
     {
       title: '操作',
       key: 'action',
-      width: 80,
+      width: 110,
       render: (_value: unknown, record: BirthdayData) => (
-        <Button
-          type="text"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={() => handleDelete(record._id)}
-        />
+        <Space size={0}>
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            title="编辑"
+            onClick={() => handleOpenEdit(record)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            title="删除"
+            onClick={() => handleDelete(record._id)}
+          />
+        </Space>
       ),
     },
   ];
@@ -908,6 +988,60 @@ export default function Home() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* 编辑生日模态框 */}
+      <Modal
+        open={editModalOpen}
+        title="编辑生日"
+        onCancel={() => {
+          setEditModalOpen(false);
+          setEditingRecord(null);
+        }}
+        onOk={handleUpdate}
+        confirmLoading={editSaving}
+        okText="保存"
+        width={520}
+        forceRender
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label="姓名"
+            rules={[{ required: true, message: '请输入姓名' }]}
+          >
+            <Input placeholder="姓名" />
+          </Form.Item>
+          <Form.Item
+            name="birthday"
+            label="生日"
+            rules={[{ required: true, message: '请选择生日' }]}
+          >
+            <DatePicker
+              picker="date"
+              format="M-D"
+              placeholder="选择生日 (月-日)"
+              style={{ width: '100%' }}
+              disabledDate={(current) => current && current.year() !== FIXED_YEAR}
+            />
+          </Form.Item>
+          <Form.Item
+            name="label"
+            label="分组"
+            rules={[{ required: true, message: '请选择或输入分组' }]}
+          >
+            <Select
+              placeholder="选择分组"
+              mode="tags"
+              maxTagCount={1}
+              options={labelOptions.map((opt) => ({ value: opt, label: opt }))}
+              popupRender={renderGroupPopup}
+            />
+          </Form.Item>
+          <Form.Item name="note" label="备注">
+            <Input placeholder="备注 (可选)" />
+          </Form.Item>
+        </Form>
       </Modal>
 
       {/* 图鉴导入模态框 */}
