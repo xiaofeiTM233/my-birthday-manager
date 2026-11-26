@@ -108,6 +108,7 @@ export default function Home() {
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogImporting, setCatalogImporting] = useState(false);
   const [catalogResults, setCatalogResults] = useState<BatchResult[]>([]);
+  const [catalogPageSize, setCatalogPageSize] = useState(10);
   // 标记最近一次图鉴请求，避免快速切换来源时旧响应覆盖新数据
   const catalogRequestRef = useRef(0);
 
@@ -915,6 +916,7 @@ export default function Home() {
         title="从图鉴导入生日"
         onCancel={() => setCatalogModalOpen(false)}
         width={860}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
         footer={[
           <Button key="cancel" onClick={() => setCatalogModalOpen(false)}>
             取消
@@ -984,7 +986,7 @@ export default function Home() {
         >
           <span>
             共 {catalogItems.length} 个，新增 {catalogNewCount} 个，已有{' '}
-            {catalogItems.length - catalogNewCount} 个
+            {catalogItems.length - catalogNewCount} 个（有本体的变体已自动去除）
           </span>
           <Button
             size="small"
@@ -1009,8 +1011,13 @@ export default function Home() {
           rowKey={(record) => catalogKey(record)}
           loading={catalogLoading}
           size="small"
-          pagination={{ pageSize: 8, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
-          scroll={{ y: 320 }}
+          pagination={{
+            pageSize: catalogPageSize,
+            showSizeChanger: true,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            onShowSizeChange: (_, size) => setCatalogPageSize(size),
+            showTotal: (total) => `共 ${total} 条`,
+          }}
           rowSelection={{
             selectedRowKeys: catalogSelectedKeys,
             onChange: (keys) => setCatalogSelectedKeys(keys),

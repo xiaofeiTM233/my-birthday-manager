@@ -118,6 +118,22 @@ function dedupeAndSort(items: CatalogItem[]): CatalogItem[] {
   );
 }
 
+// 去掉名字末尾的括号后缀（泳装、正月、临战……），返回本体名
+function baseName(name: string): string | null {
+  const match = name.match(/^(.*?)\s*[（(][^（()）]*[)）]$/);
+  const base = match?.[1]?.trim();
+  return base || null;
+}
+
+// 有本体时自动去掉变体；只有变体、没有本体的角色保留，避免丢角色
+function removeVariants(items: CatalogItem[]): CatalogItem[] {
+  const names = new Set(items.map((item) => item.name));
+  return items.filter((item) => {
+    const base = baseName(item.name);
+    return base === null || !names.has(base);
+  });
+}
+
 interface CacheEntry {
   ts: number;
   items: CatalogItem[];
@@ -139,7 +155,7 @@ export async function getCatalog(game: CatalogGame): Promise<CatalogItem[] | nul
 
   const task = (async (): Promise<CatalogItem[]> => {
     const items = game === 'B' ? await loadSchale() : await loadStella();
-    return dedupeAndSort(items);
+    return dedupeAndSort(removeVariants(items));
   })();
 
   pending.set(game, task);
