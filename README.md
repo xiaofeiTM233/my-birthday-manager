@@ -1,6 +1,6 @@
 # SnapBirthday | my-birthday-manager
 
-一个基于 [Next.js](https://nextjs.org/) 和 [Ant Design](https://ant.design/) 构建的生日记录工具（改造自 [SnapIP](https://github.com/xiaofeiTM233/SnapIP)）。支持生日（月-日）的统一管理、批量导入导出、分组管理和按姓名查询。
+一个基于 [Next.js](https://nextjs.org/) 和 [Ant Design](https://ant.design/) 构建的生日记录工具（改造自 [SnapIP](https://github.com/xiaofeiTM233/SnapIP)）。支持生日（月-日）的统一管理、批量/图鉴导入导出、分组管理和按姓名查询。
 
 ## ✨ 核心特性
 
@@ -11,6 +11,7 @@
 - 🔍 **多条件查询**：按姓名模糊搜索，也可按生日（月-日，或仅月份）、分组组合筛选。
 - 📅 **日历视图**：独立页面，上方「即将到来」按倒计时展示最近的生日，下方全年 12 个月日历总览，生日以头像形式标注在对应日期上（支持按分组筛选）。
 - 📦 **批量导入**：支持从文本批量导入（格式：`姓名 日期`，空格分隔，一行一条；日期支持中文格式 `1月1日`，或分隔符格式 `1-1`，分隔符可用 `-` `/` `.` `,`，纯数字无需前导零）。
+- 🌐 **图鉴导入**：可从 [schaledb](https://schaledb.com/data/zh/students.min.json)（蔚蓝档案 B）和 [stella](https://stella.ennead.cc/api/stella/characters?lang=CN)（星塔旅人 S）拉取角色生日名单，预览勾选后批量导入，已存在或未公开生日的角色自动跳过。
 - 💾 **灵活导出**：支持一行一个和逗号分隔两种导出格式，按月日排序。
 - 🔁 **重复检测**：同一姓名 + 同一生日自动跳过，防止重复录入。
 - 💾 **数据持久化**：基于 MongoDB 存储，数据安全可靠。

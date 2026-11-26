@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import { Layout, Table, Input, Button, Form, Tag, Select, message, Card, Modal, DatePicker, Space, Alert, Divider } from 'antd';
 import type { InputRef } from 'antd';
 import type { Dayjs } from 'dayjs';
-import { SearchOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined, DownloadOutlined, GithubOutlined, CalendarOutlined } from '@ant-design/icons';
+import { SearchOutlined, PlusOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined, DownloadOutlined, GithubOutlined, CalendarOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import CharAvatar from '@/components/CharAvatar';
+import type { CatalogGame, CatalogItem } from '@/lib/catalog';
 
 const { Header, Content } = Layout;
 const { TextArea } = Input;
@@ -46,6 +47,11 @@ interface FormValues {
   birthday: Dayjs;
   label: string | string[];
   note?: string;
+}
+
+// 图鉴条目在预览表格与「已有」集合中的唯一键
+function catalogKey(item: { name: string; month: number; day: number }): string {
+  return `${item.name}|${item.month}|${item.day}`;
 }
 
 // 从一行文本解析生日和姓名，固定格式：姓名 日期（空格分隔，姓名在前）
@@ -90,6 +96,20 @@ export default function Home() {
   const addLabelInputRef = useRef<InputRef>(null); // 添加分组输入框引用
   // 头像 图/文 模式，与日历页共用
   const [avatarMode, setAvatarMode] = useState<'image' | 'text'>('image');
+  // 图鉴导入模态框
+  const [catalogModalOpen, setCatalogModalOpen] = useState(false);
+  const [catalogGame, setCatalogGame] = useState<CatalogGame>('B');
+  const [catalogLabel, setCatalogLabel] = useState<string>('B');
+  const [catalogNote, setCatalogNote] = useState<string>('');
+  const [catalogSearch, setCatalogSearch] = useState<string>('');
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [catalogExisting, setCatalogExisting] = useState<Set<string>>(new Set());
+  const [catalogSelectedKeys, setCatalogSelectedKeys] = useState<React.Key[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogImporting, setCatalogImporting] = useState(false);
+  const [catalogResults, setCatalogResults] = useState<BatchResult[]>([]);
+  // 标记最近一次图鉴请求，避免快速切换来源时旧响应覆盖新数据
+  const catalogRequestRef = useRef(0);
 
   // 添加新分组
   const handleAddLabel = (e: React.MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => {
@@ -394,6 +414,134 @@ export default function Home() {
     }
   };
 
+  // 拉取图鉴名单，同时取全部现有记录用于标记「已有」
+  const loadCatalog = async (game: CatalogGame) => {
+    const requestId = catalogRequestRef.current + 1;
+    catalogRequestRef.current = requestId;
+    setCatalogLoading(true);
+    setCatalogResults([]);
+    try {
+      const [catalogRes, allRes] = await Promise.all([
+        fetch(`/api/catalog?game=${game}`),
+        fetch('/api/birthdays'),
+      ]);
+      const catalogJson: { success: boolean; message?: string; data?: CatalogItem[] } =
+        await catalogRes.json();
+      const allJson: { success: boolean; data?: BirthdayData[] } = await allRes.json();
+
+      // 已有更新的一次请求，丢弃本次结果
+      if (catalogRequestRef.current !== requestId) return;
+
+      if (!catalogJson.success || !catalogJson.data) {
+        setCatalogItems([]);
+        setCatalogSelectedKeys([]);
+        message.error(catalogJson.message || '图鉴拉取失败');
+        return;
+      }
+
+      const existing = new Set(
+        (allJson.success ? allJson.data ?? [] : []).map((item) => catalogKey(item))
+      );
+      setCatalogExisting(existing);
+      setCatalogItems(catalogJson.data);
+      // 默认勾选所有尚未导入的角色
+      setCatalogSelectedKeys(
+        catalogJson.data.filter((item) => !existing.has(catalogKey(item))).map(catalogKey)
+      );
+    } catch {
+      if (catalogRequestRef.current !== requestId) return;
+      setCatalogItems([]);
+      setCatalogSelectedKeys([]);
+      message.error('图鉴拉取失败，请稍后重试');
+    } finally {
+      if (catalogRequestRef.current === requestId) setCatalogLoading(false);
+    }
+  };
+
+  // 打开图鉴导入模态框
+  const handleOpenCatalog = () => {
+    setCatalogModalOpen(true);
+    setCatalogGame('B');
+    setCatalogLabel('B');
+    setCatalogNote('');
+    setCatalogSearch('');
+    setCatalogResults([]);
+    setCatalogItems([]);
+    setCatalogSelectedKeys([]);
+    void loadCatalog('B');
+  };
+
+  // 切换图鉴来源
+  const handleCatalogGameChange = (game: CatalogGame) => {
+    setCatalogGame(game);
+    setCatalogLabel(game);
+    setCatalogSearch('');
+    setCatalogItems([]);
+    setCatalogSelectedKeys([]);
+    void loadCatalog(game);
+  };
+
+  // 导入选中
+  const handleCatalogImport = async () => {
+    const selected = catalogItems.filter((item) => catalogSelectedKeys.includes(catalogKey(item)));
+    if (selected.length === 0) {
+      message.warning('请选择要导入的角色');
+      return;
+    }
+    if (!catalogLabel) {
+      message.warning('请选择分组');
+      return;
+    }
+
+    setCatalogImporting(true);
+    try {
+      const items: BatchItem[] = selected.map((item) => ({
+        original: `${item.name} ${item.month}-${item.day}`,
+        name: item.name,
+        month: item.month,
+        day: item.day,
+        label: catalogLabel,
+        note: catalogNote.trim() || undefined,
+      }));
+      const res = await fetch('/api/birthdays/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+      const json: { success: boolean; message?: string; results?: BatchResult[] } = await res.json();
+      if (!json.success) {
+        message.error(json.message || '导入失败');
+        return;
+      }
+
+      const results = json.results ?? [];
+      setCatalogResults(results);
+      const successCount = results.filter((r) => r.status === 'success').length;
+      const errorCount = results.filter((r) => r.status === 'error').length;
+      const skippedCount = results.filter((r) => r.status === 'skipped').length;
+      message.success(
+        `导入完成：成功 ${successCount} 个，跳过 ${skippedCount} 个${errorCount ? `，错误 ${errorCount} 个` : ''}`
+      );
+
+      // 已处理的条目在预览里标记为已有，避免重复点选
+      setCatalogExisting((prev) => {
+        const next = new Set(prev);
+        for (const item of selected) next.add(catalogKey(item));
+        return next;
+      });
+      setCatalogSelectedKeys([]);
+
+      if (!labelOptions.includes(catalogLabel)) {
+        setLabelOptions([...labelOptions, catalogLabel]);
+      }
+      fetchBirthdays(filterLabel, filterName, filterBirthday);
+    } catch {
+      message.error('网络请求错误');
+    } finally {
+      setCatalogImporting(false);
+    }
+  };
+
   // 表格列定义
   const columns = [
     {
@@ -457,6 +605,46 @@ export default function Home() {
     },
   ];
 
+  // 图鉴预览列
+  const catalogColumns = [
+    {
+      title: '姓名',
+      dataIndex: 'name',
+      key: 'name',
+    },
+    {
+      title: '生日',
+      key: 'birthday',
+      width: 110,
+      render: (_value: unknown, record: CatalogItem) => `${record.month}月${record.day}日`,
+    },
+    {
+      title: '学校 / 阵营',
+      dataIndex: 'extra',
+      key: 'extra',
+      width: 180,
+      render: (value?: string) => value || '-',
+    },
+    {
+      title: '状态',
+      key: 'status',
+      width: 90,
+      render: (_value: unknown, record: CatalogItem) =>
+        catalogExisting.has(catalogKey(record)) ? <Tag>已有</Tag> : <Tag color="green">新增</Tag>,
+    },
+  ];
+
+  const catalogKeyword = catalogSearch.trim();
+  const catalogFiltered = catalogItems.filter(
+    (item) =>
+      !catalogKeyword ||
+      item.name.includes(catalogKeyword) ||
+      (item.extra ?? '').includes(catalogKeyword)
+  );
+  const catalogNewCount = catalogItems.filter(
+    (item) => !catalogExisting.has(catalogKey(item))
+  ).length;
+
   if (!mounted) {
     return null;
   }
@@ -492,13 +680,22 @@ export default function Home() {
           title="添加生日"
           style={{ marginBottom: 24 }}
           extra={
-            <Button
-              type="default"
-              icon={<UploadOutlined />}
-              onClick={handleOpenBatchImport}
-            >
-              批量导入
-            </Button>
+            <Space>
+              <Button
+                type="default"
+                icon={<CloudDownloadOutlined />}
+                onClick={handleOpenCatalog}
+              >
+                图鉴导入
+              </Button>
+              <Button
+                type="default"
+                icon={<UploadOutlined />}
+                onClick={handleOpenBatchImport}
+              >
+                批量导入
+              </Button>
+            </Space>
           }
         >
           <Form form={form} layout="horizontal" onFinish={onFinish}>
@@ -708,6 +905,148 @@ export default function Home() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* 图鉴导入模态框 */}
+      <Modal
+        open={catalogModalOpen}
+        title="从图鉴导入生日"
+        onCancel={() => setCatalogModalOpen(false)}
+        width={860}
+        footer={[
+          <Button key="cancel" onClick={() => setCatalogModalOpen(false)}>
+            取消
+          </Button>,
+          <Button
+            key="import"
+            type="primary"
+            onClick={handleCatalogImport}
+            loading={catalogImporting}
+            disabled={catalogSelectedKeys.length === 0}
+          >
+            导入选中（{catalogSelectedKeys.length}）
+          </Button>,
+        ]}
+      >
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            marginBottom: 12,
+          }}
+        >
+          <Select<CatalogGame>
+            value={catalogGame}
+            onChange={handleCatalogGameChange}
+            style={{ width: 230 }}
+            options={[
+              { value: 'B', label: '蔚蓝档案 · schaledb' },
+              { value: 'S', label: '星塔旅人 · stella' },
+            ]}
+          />
+          <Select
+            value={catalogLabel}
+            onChange={setCatalogLabel}
+            style={{ width: 120 }}
+            placeholder="导入分组"
+            options={Array.from(new Set([...labelOptions, catalogLabel])).map((opt) => ({
+              value: opt,
+              label: opt,
+            }))}
+            popupRender={renderGroupPopup}
+          />
+          <Input
+            placeholder="搜索姓名 / 学校 / 阵营"
+            prefix={<SearchOutlined />}
+            value={catalogSearch}
+            onChange={(e) => setCatalogSearch(e.target.value)}
+            allowClear
+            style={{ width: 220 }}
+          />
+          <Button onClick={() => void loadCatalog(catalogGame)} loading={catalogLoading}>
+            刷新
+          </Button>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            marginBottom: 8,
+            fontSize: 13,
+            color: '#666',
+          }}
+        >
+          <span>
+            共 {catalogItems.length} 个，新增 {catalogNewCount} 个，已有{' '}
+            {catalogItems.length - catalogNewCount} 个
+          </span>
+          <Button
+            size="small"
+            onClick={() =>
+              setCatalogSelectedKeys(
+                catalogItems
+                  .filter((item) => !catalogExisting.has(catalogKey(item)))
+                  .map(catalogKey)
+              )
+            }
+          >
+            全选新增
+          </Button>
+          <Button size="small" onClick={() => setCatalogSelectedKeys([])}>
+            清空选择
+          </Button>
+        </div>
+
+        <Table
+          columns={catalogColumns}
+          dataSource={catalogFiltered}
+          rowKey={(record) => catalogKey(record)}
+          loading={catalogLoading}
+          size="small"
+          pagination={{ pageSize: 8, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
+          scroll={{ y: 320 }}
+          rowSelection={{
+            selectedRowKeys: catalogSelectedKeys,
+            onChange: (keys) => setCatalogSelectedKeys(keys),
+            getCheckboxProps: (record) => ({
+              disabled: catalogExisting.has(catalogKey(record)),
+            }),
+          }}
+        />
+
+        <div style={{ marginTop: 12 }}>
+          <Input
+            placeholder="为本次导入添加备注（可选）"
+            value={catalogNote}
+            onChange={(e) => setCatalogNote(e.target.value)}
+          />
+        </div>
+
+        {catalogResults.length > 0 && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 10,
+              background: '#fafafa',
+              borderRadius: 6,
+              fontSize: 13,
+            }}
+          >
+            <p style={{ color: '#52c41a', marginBottom: 4 }}>
+              ✓ 成功：{catalogResults.filter((r) => r.status === 'success').length} 个
+            </p>
+            <p style={{ color: '#999', marginBottom: 4 }}>
+              ⊘ 跳过（已存在）：{catalogResults.filter((r) => r.status === 'skipped').length} 个
+            </p>
+            <p style={{ color: '#ff4d4f', marginBottom: 0 }}>
+              ✗ 错误：{catalogResults.filter((r) => r.status === 'error').length} 个
+            </p>
           </div>
         )}
       </Modal>
